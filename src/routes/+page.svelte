@@ -6,6 +6,8 @@
 	import { fetchPlaces, type FetchResult } from '$lib/overpass';
 	import { openStatus } from '$lib/opening-hours';
 	import { OFFICE, RADIUS_M } from '$lib/config';
+	import { fetchWalkingRoute, getCurrentPosition } from '$lib/route';
+	import type { FeatureCollection } from 'geojson';
 	import { onMount } from 'svelte';
 
 	let result = $state<FetchResult | null>(null);
@@ -16,6 +18,14 @@
 	let openNowOnly = $state(false);
 	let selectedId = $state<string | null>(null);
 	let sheetExpanded = $state(false);
+	let sheetHidden = $state(false);
+
+	let userLocation = $state<{ lat: number; lon: number } | null>(null);
+	let route = $state<FeatureCollection | null>(null);
+	let routeMeta = $state<{ distanceM: number; durationS: number } | null>(null);
+	let routeLoading = $state(false);
+	let routeError = $state<string | null>(null);
+	let fitRoute = $state(false);
 
 	onMount(async () => {
 		try {
@@ -65,24 +75,134 @@
 
 	function selectPlace(id: string) {
 		selectedId = id;
-		sheetExpanded = true;
+		fitRoute = false;
+		clearRoute();
 	}
+
+	function clearRoute() {
+		route = null;
+		routeMeta = null;
+		routeError = null;
+	}
+
+	async function showDirections(id: string) {
+		const place = places.find((p) => p.id === id);
+		if (!place) return;
+		selectedId = id;
+		sheetHidden = true;
+		sheetExpanded = false;
+		fitRoute = true;
+		routeError = null;
+		routeLoading = true;
+		clearRoute();
+
+		let from: { lat: number; lon: number };
+		try {
+			from = userLocation ?? (await getCurrentPosition());
+			userLocation = from;
+		} catch {
+			from = OFFICE;
+			routeError = "Couldn't get your location — showing route from the office.";
+		}
+
+		try {
+			const r = await fetchWalkingRoute(from, { lat: place.lat, lon: place.lon });
+			if (r) {
+				route = r.geojson;
+				routeMeta = { distanceM: r.distanceM, durationS: r.durationS };
+			} else {
+				routeError = (routeError ?? '') + ' Routing service unavailable.';
+			}
+		} catch {
+			routeError = (routeError ?? '') + ' Routing service unavailable.';
+		} finally {
+			routeLoading = false;
+		}
+	}
+
+	function clearDirections() {
+		clearRoute();
+		fitRoute = false;
+		sheetHidden = false;
+	}
+
+	const selectedPlace = $derived(selectedId ? places.find((p) => p.id === selectedId) : null);
+
+	const externalDirectionsUrl = $derived.by(() => {
+		if (!selectedPlace) return '';
+		const { lat, lon } = selectedPlace;
+		return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
+	});
 </script>
 
-<div class="app">
+<div class="app" class:sheet-hidden={sheetHidden}>
 	<div class="map-wrap">
-		<MapView places={filtered} {selectedId} onselect={selectPlace} />
+		<MapView
+			places={filtered}
+			{selectedId}
+			{userLocation}
+			{route}
+			{fitRoute}
+			onselect={selectPlace}
+		/>
+
+		{#if sheetHidden}
+			<button
+				class="floating-show"
+				type="button"
+				onclick={() => (sheetHidden = false)}
+				aria-label="Show panel"
+			>
+				☰ Panel
+			</button>
+		{/if}
+
+		{#if route || routeLoading || routeError}
+			<div class="directions-banner" role="status">
+				{#if routeLoading}
+					<span>Finding route…</span>
+				{:else if routeMeta && selectedPlace}
+					<div class="route-info">
+						<strong>{selectedPlace.name}</strong>
+						<span>
+							{Math.round(routeMeta.distanceM)} m ·
+							🚶 {Math.max(1, Math.round(routeMeta.durationS / 60))} min
+						</span>
+					</div>
+					<div class="route-actions">
+						<a class="ext-link" href={externalDirectionsUrl} target="_blank" rel="noopener">
+							Open in Google Maps ↗
+						</a>
+						<button type="button" class="banner-close" onclick={clearDirections}>Close</button>
+					</div>
+				{:else if routeError}
+					<span class="error">{routeError}</span>
+					<button type="button" class="banner-close" onclick={clearDirections}>Close</button>
+				{/if}
+			</div>
+		{/if}
 	</div>
 
-	<aside class="sheet" class:expanded={sheetExpanded}>
-		<button
-			class="sheet-handle"
-			type="button"
-			onclick={() => (sheetExpanded = !sheetExpanded)}
-			aria-label={sheetExpanded ? 'Collapse list' : 'Expand list'}
-		>
-			<span class="grip"></span>
-		</button>
+	<aside class="sheet" class:expanded={sheetExpanded} class:hidden={sheetHidden}>
+		<div class="sheet-controls">
+			<button
+				class="sheet-handle"
+				type="button"
+				onclick={() => (sheetExpanded = !sheetExpanded)}
+				aria-label={sheetExpanded ? 'Collapse list' : 'Expand list'}
+			>
+				<span class="grip"></span>
+			</button>
+			<button
+				class="hide-btn"
+				type="button"
+				onclick={() => (sheetHidden = true)}
+				aria-label="Hide panel"
+				title="Hide panel"
+			>
+				✕
+			</button>
+		</div>
 
 		<header class="sheet-header">
 			<div class="title">
@@ -90,7 +210,7 @@
 				<span>{OFFICE.name}</span>
 				<span class="radius">· {RADIUS_M} m</span>
 			</div>
-			<PickForUs places={filtered} onpick={selectPlace} />
+			<PickForUs places={filtered} onpick={selectPlace} ondirections={showDirections} />
 		</header>
 
 		<div class="sheet-body">
@@ -131,6 +251,78 @@
 	.map-wrap {
 		flex: 1;
 		min-height: 0;
+		position: relative;
+	}
+
+	.floating-show {
+		position: absolute;
+		bottom: 16px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: var(--surface);
+		color: var(--on-surface);
+		border: 1px solid #2a2f38;
+		border-radius: 999px;
+		padding: 10px 18px;
+		font-weight: 600;
+		font-size: 0.9rem;
+		cursor: pointer;
+		font-family: inherit;
+		box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+		z-index: 10;
+	}
+	.floating-show:hover {
+		background: #232730;
+	}
+
+	.directions-banner {
+		position: absolute;
+		left: 12px;
+		right: 12px;
+		top: 12px;
+		background: var(--surface);
+		color: var(--on-surface);
+		border-radius: 12px;
+		padding: 12px 14px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+		z-index: 10;
+		flex-wrap: wrap;
+		font-size: 0.9rem;
+	}
+	.directions-banner .route-info {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.directions-banner strong {
+		font-size: 0.95rem;
+	}
+	.directions-banner .route-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.directions-banner .ext-link {
+		color: var(--accent);
+		text-decoration: none;
+		font-weight: 600;
+	}
+	.directions-banner .banner-close {
+		background: transparent;
+		border: 1px solid #2a2f38;
+		color: var(--on-surface);
+		border-radius: 8px;
+		padding: 6px 10px;
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.85rem;
+	}
+	.directions-banner .error {
+		color: #f87171;
 	}
 
 	.sheet {
@@ -141,13 +333,24 @@
 		display: flex;
 		flex-direction: column;
 		max-height: 38vh;
-		transition: max-height 0.3s ease;
+		transition: max-height 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
 		overflow: hidden;
 	}
 	.sheet.expanded {
 		max-height: 80vh;
 	}
+	.sheet.hidden {
+		transform: translateY(110%);
+		opacity: 0;
+		pointer-events: none;
+	}
 
+	.sheet-controls {
+		position: relative;
+		display: grid;
+		place-items: center;
+		padding: 4px 0;
+	}
 	.sheet-handle {
 		background: transparent;
 		border: none;
@@ -161,6 +364,22 @@
 		height: 4px;
 		border-radius: 2px;
 		background: #3a3f4a;
+	}
+	.hide-btn {
+		position: absolute;
+		right: 8px;
+		top: 4px;
+		background: transparent;
+		border: none;
+		color: var(--muted);
+		font-size: 1rem;
+		cursor: pointer;
+		padding: 6px 10px;
+		border-radius: 8px;
+	}
+	.hide-btn:hover {
+		color: var(--on-surface);
+		background: rgba(255, 255, 255, 0.05);
 	}
 
 	.sheet-header {
@@ -215,7 +434,6 @@
 		margin: 0;
 	}
 
-	/* Desktop: side-by-side layout */
 	@media (min-width: 900px) {
 		.app {
 			flex-direction: row-reverse;
@@ -229,6 +447,10 @@
 			height: 100%;
 			border-radius: 0;
 			box-shadow: 8px 0 28px rgba(0, 0, 0, 0.4);
+			transition: transform 0.3s ease, opacity 0.3s ease;
+		}
+		.sheet.hidden {
+			transform: translateX(110%);
 		}
 		.sheet-handle {
 			display: none;

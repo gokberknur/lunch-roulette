@@ -1,27 +1,38 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import maplibregl, { Map as MlMap, Marker, Popup } from 'maplibre-gl';
+	import maplibregl, { Map as MlMap, Marker, Popup, LngLatBounds } from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { MAPTILER_KEY, OFFICE, RADIUS_M } from '$lib/config';
 	import type { Place } from '$lib/types';
+	import type { FeatureCollection } from 'geojson';
 
 	type Props = {
 		places: Place[];
 		selectedId: string | null;
+		userLocation?: { lat: number; lon: number } | null;
+		route?: FeatureCollection | null;
+		fitRoute?: boolean;
 		onselect?: (id: string) => void;
 	};
 
-	let { places, selectedId, onselect }: Props = $props();
+	let {
+		places,
+		selectedId,
+		userLocation = null,
+		route = null,
+		fitRoute = false,
+		onselect
+	}: Props = $props();
 
 	let container: HTMLDivElement;
 	let map: MlMap | undefined;
 	let markers = new Map<string, Marker>();
+	let userMarker: Marker | undefined;
 	let mapReady = $state(false);
 
 	const styleUrl = MAPTILER_KEY
 		? `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`
-		: // Fallback OSM raster tiles — not for production but renders without a key.
-			{
+		: {
 				version: 8 as const,
 				sources: {
 					osm: {
@@ -54,6 +65,8 @@
 		};
 	}
 
+	const emptyRoute: FeatureCollection = { type: 'FeatureCollection', features: [] };
+
 	onMount(() => {
 		map = new maplibregl.Map({
 			container,
@@ -79,6 +92,22 @@
 				type: 'line',
 				source: 'radius',
 				paint: { 'line-color': '#ff6b35', 'line-width': 1.5, 'line-dasharray': [2, 2] }
+			});
+
+			map.addSource('route', { type: 'geojson', data: emptyRoute });
+			map.addLayer({
+				id: 'route-casing',
+				type: 'line',
+				source: 'route',
+				layout: { 'line-cap': 'round', 'line-join': 'round' },
+				paint: { 'line-color': '#0f1115', 'line-width': 8, 'line-opacity': 0.6 }
+			});
+			map.addLayer({
+				id: 'route-line',
+				type: 'line',
+				source: 'route',
+				layout: { 'line-cap': 'round', 'line-join': 'round' },
+				paint: { 'line-color': '#ff6b35', 'line-width': 5 }
 			});
 
 			const officeEl = document.createElement('div');
@@ -144,10 +173,48 @@
 			const el = m.getElement();
 			el.classList.toggle('selected', id === selectedId);
 		}
-		if (selectedId && map) {
+		if (selectedId && map && !fitRoute) {
 			const place = places.find((p) => p.id === selectedId);
 			if (place) {
 				map.flyTo({ center: [place.lon, place.lat], zoom: 17, duration: 600 });
+			}
+		}
+	});
+
+	$effect(() => {
+		if (!map || !mapReady) return;
+		if (userLocation) {
+			if (!userMarker) {
+				const el = document.createElement('div');
+				el.className = 'user-pin';
+				el.innerHTML = '<span class="user-dot"></span>';
+				userMarker = new maplibregl.Marker({ element: el })
+					.setLngLat([userLocation.lon, userLocation.lat])
+					.addTo(map);
+			} else {
+				userMarker.setLngLat([userLocation.lon, userLocation.lat]);
+			}
+		} else if (userMarker) {
+			userMarker.remove();
+			userMarker = undefined;
+		}
+	});
+
+	$effect(() => {
+		if (!map || !mapReady) return;
+		const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
+		if (!src) return;
+		src.setData(route ?? emptyRoute);
+
+		if (fitRoute && route && route.features.length > 0) {
+			const bounds = new LngLatBounds();
+			for (const f of route.features) {
+				if (f.geometry.type === 'LineString') {
+					for (const c of f.geometry.coordinates) bounds.extend(c as [number, number]);
+				}
+			}
+			if (!bounds.isEmpty()) {
+				map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 700 });
 			}
 		}
 	});
@@ -190,5 +257,20 @@
 		transform: scale(1.25);
 		border-color: #0f1115;
 		background: #ffeb3b;
+	}
+
+	:global(.user-pin) {
+		width: 22px;
+		height: 22px;
+		display: grid;
+		place-items: center;
+	}
+	:global(.user-pin .user-dot) {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: #1e90ff;
+		border: 3px solid white;
+		box-shadow: 0 0 0 3px rgba(30, 144, 255, 0.25);
 	}
 </style>

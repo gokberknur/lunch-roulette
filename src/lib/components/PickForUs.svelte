@@ -4,9 +4,10 @@
 	type Props = {
 		places: Place[];
 		onpick: (id: string) => void;
+		ondirections?: (id: string) => void;
 	};
 
-	let { places, onpick }: Props = $props();
+	let { places, onpick, ondirections }: Props = $props();
 
 	let picked = $state<Place | null>(null);
 	let spinning = $state(false);
@@ -34,6 +35,13 @@
 
 	function close() {
 		picked = null;
+	}
+
+	function showDirections() {
+		if (!picked) return;
+		const id = picked.id;
+		picked = null;
+		ondirections?.(id);
 	}
 
 	const canPick = $derived(places.length > 0);
@@ -68,14 +76,9 @@
 				{/if}
 			</div>
 			<div class="actions">
-				<a
-					class="btn-primary"
-					href="https://www.openstreetmap.org/?mlat={picked.lat}&mlon={picked.lon}#map=19/{picked.lat}/{picked.lon}"
-					target="_blank"
-					rel="noopener"
-				>
-					Open in map
-				</a>
+				<button class="btn-primary" type="button" onclick={showDirections}>
+					🧭 Show directions
+				</button>
 				<button class="btn-ghost" type="button" onclick={spin}>Spin again</button>
 				<button class="btn-ghost" type="button" onclick={close}>Close</button>
 			</div>
@@ -168,11 +171,11 @@
 		font-family: inherit;
 		text-decoration: none;
 		text-align: center;
+		border: none;
 	}
 	.btn-primary {
 		background: #ff6b35;
 		color: #0f1115;
-		border: none;
 	}
 	.btn-ghost {
 		background: transparent;
