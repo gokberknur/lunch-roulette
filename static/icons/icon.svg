@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#ff6b35"/>
+  <!-- Stylized fork + spoon emblem -->
+  <g fill="#0f1115" stroke="#0f1115" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Fork -->
+    <rect x="170" y="190" width="20" height="80" rx="6"/>
+    <rect x="210" y="190" width="20" height="80" rx="6"/>
+    <rect x="250" y="190" width="20" height="80" rx="6"/>
+    <rect x="190" y="260" width="60" height="20"/>
+    <rect x="210" y="270" width="20" height="160" rx="10"/>
+    <!-- Spoon -->
+    <ellipse cx="320" cy="220" rx="40" ry="55"/>
+    <rect x="310" y="270" width="20" height="160" rx="10"/>
+  </g>
+</svg>
