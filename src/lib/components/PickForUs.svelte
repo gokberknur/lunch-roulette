@@ -37,6 +37,10 @@
 		picked = null;
 	}
 
+	function onWindowKeydown(e: KeyboardEvent) {
+		if (picked && !spinning && e.key === 'Escape') close();
+	}
+
 	function showDirections() {
 		if (!picked) return;
 		const id = picked.id;
@@ -47,24 +51,21 @@
 	const canPick = $derived(places.length > 0);
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <button class="spin" type="button" onclick={spin} disabled={!canPick || spinning}>
 	{spinning ? 'Spinning…' : '🎲 Pick for us'}
 </button>
 
 {#if picked && !spinning}
-	<div
-		class="modal-backdrop"
-		onclick={close}
-		onkeydown={(e) => e.key === 'Escape' && close()}
-		role="presentation"
-	>
+	<!-- svelte-ignore a11y_click_events_have_key_events -- Escape handled by svelte:window above -->
+	<div class="modal-backdrop" onclick={close} role="presentation">
 		<div
 			class="modal"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="pick-name"
 			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
 			tabindex="-1"
 		>
 			<div class="result-label">Today you eat at…</div>

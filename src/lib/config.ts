@@ -9,3 +9,4 @@ export const RADIUS_M = 500;
 import { env } from '$env/dynamic/public';
 
 export const MAPTILER_KEY = env.PUBLIC_MAPTILER_KEY ?? '';
+export const ORS_KEY = env.PUBLIC_ORS_KEY ?? '';

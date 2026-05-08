@@ -3,10 +3,10 @@ import { haversineMeters, walkMinutes } from './distance';
 import type { Amenity, Place } from './types';
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-const CACHE_KEY = `lunch-roulette:places:v1:${OFFICE.lat},${OFFICE.lon}:${RADIUS_M}`;
+const CACHE_KEY = `lunch-roulette:places:v2:${OFFICE.lat},${OFFICE.lon}:${RADIUS_M}`;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-const AMENITIES: Amenity[] = ['restaurant', 'cafe', 'fast_food', 'food_court'];
+const AMENITIES: Amenity[] = ['restaurant', 'fast_food', 'food_court'];
 
 type OverpassElement = {
 	type: 'node' | 'way' | 'relation';

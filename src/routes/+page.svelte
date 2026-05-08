@@ -6,21 +6,27 @@
 	import { fetchPlaces, type FetchResult } from '$lib/overpass';
 	import { openStatus } from '$lib/opening-hours';
 	import { OFFICE, RADIUS_M } from '$lib/config';
-	import { fetchWalkingRoute, getCurrentPosition } from '$lib/route';
+	import { fetchWalkingRoute, watchPosition, type WatchedPosition } from '$lib/route';
+	import type { FindMeState } from '$lib/components/Map.svelte';
 	import type { FeatureCollection } from 'geojson';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	let result = $state<FetchResult | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
-	let selectedCuisines = $state(new Set<string>());
+	const selectedCuisines = new SvelteSet<string>();
 	let openNowOnly = $state(false);
 	let selectedId = $state<string | null>(null);
 	let sheetExpanded = $state(false);
 	let sheetHidden = $state(false);
 
-	let userLocation = $state<{ lat: number; lon: number } | null>(null);
+	let userPosition = $state<WatchedPosition | null>(null);
+	let followUser = $state(false);
+	let findMeState = $state<FindMeState>('idle');
+	let stopWatch: (() => void) | null = null;
+
 	let route = $state<FeatureCollection | null>(null);
 	let routeMeta = $state<{ distanceM: number; durationS: number } | null>(null);
 	let routeLoading = $state(false);
@@ -36,6 +42,53 @@
 			loading = false;
 		}
 	});
+
+	function stopFindMe() {
+		stopWatch?.();
+		stopWatch = null;
+		followUser = false;
+		if (findMeState === 'tracking') findMeState = 'idle';
+	}
+
+	function handleFindMe() {
+		if (findMeState === 'tracking') {
+			// already watching: just resume follow + recentre (Map.svelte handles the pan)
+			followUser = true;
+			return;
+		}
+		findMeState = 'locating';
+		stopWatch = watchPosition(
+			(pos) => {
+				userPosition = pos;
+				findMeState = 'tracking';
+				followUser = true;
+			},
+			(err) => {
+				if (err.code === err.PERMISSION_DENIED) {
+					findMeState = 'denied';
+				} else {
+					findMeState = 'idle';
+				}
+				stopWatch?.();
+				stopWatch = null;
+			}
+		);
+	}
+
+	function handleUserPan() {
+		if (followUser) followUser = false;
+	}
+
+	function onVisibilityChange() {
+		if (document.visibilityState === 'hidden') stopFindMe();
+	}
+
+	$effect(() => {
+		document.addEventListener('visibilitychange', onVisibilityChange);
+		return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+	});
+
+	onDestroy(stopFindMe);
 
 	const places = $derived(result?.places ?? []);
 
@@ -59,14 +112,12 @@
 	});
 
 	function toggleCuisine(c: string) {
-		const next = new Set(selectedCuisines);
-		if (next.has(c)) next.delete(c);
-		else next.add(c);
-		selectedCuisines = next;
+		if (selectedCuisines.has(c)) selectedCuisines.delete(c);
+		else selectedCuisines.add(c);
 	}
 
 	function clearCuisines() {
-		selectedCuisines = new Set();
+		selectedCuisines.clear();
 	}
 
 	function toggleOpenNow() {
@@ -97,27 +148,29 @@
 		clearRoute();
 
 		let from: { lat: number; lon: number };
-		try {
-			from = userLocation ?? (await getCurrentPosition());
-			userLocation = from;
-		} catch {
+		if (userPosition) {
+			from = { lat: userPosition.lat, lon: userPosition.lon };
+		} else {
 			from = OFFICE;
-			routeError = "Couldn't get your location — showing route from the office.";
+			routeError = 'Tap "Find me" to route from your location — showing route from the office.';
 		}
 
-		try {
-			const r = await fetchWalkingRoute(from, { lat: place.lat, lon: place.lon });
-			if (r) {
-				route = r.geojson;
-				routeMeta = { distanceM: r.distanceM, durationS: r.durationS };
-			} else {
-				routeError = (routeError ?? '') + ' Routing service unavailable.';
-			}
-		} catch {
-			routeError = (routeError ?? '') + ' Routing service unavailable.';
-		} finally {
-			routeLoading = false;
+		const r = await fetchWalkingRoute(from, { lat: place.lat, lon: place.lon });
+		routeLoading = false;
+
+		if (typeof r === 'string') {
+			const messages: Record<typeof r, string> = {
+				'no-key': 'Walking directions unavailable — PUBLIC_ORS_KEY is not set.',
+				unauthorized: 'Walking directions unavailable — invalid OpenRouteService key.',
+				'rate-limited': 'Hit the daily directions limit — try again tomorrow.',
+				unavailable: 'Routing service unavailable.'
+			};
+			routeError = (routeError ? routeError + ' ' : '') + messages[r];
+			return;
 		}
+
+		route = r.geojson;
+		routeMeta = { distanceM: r.distanceM, durationS: r.durationS };
 	}
 
 	function clearDirections() {
@@ -140,10 +193,16 @@
 		<MapView
 			places={filtered}
 			{selectedId}
-			{userLocation}
+			userLocation={userPosition ? { lat: userPosition.lat, lon: userPosition.lon } : null}
+			accuracy={userPosition?.accuracy ?? null}
+			{followUser}
 			{route}
 			{fitRoute}
+			{findMeState}
 			onselect={selectPlace}
+			ondirections={showDirections}
+			onfindme={handleFindMe}
+			onuserpan={handleUserPan}
 		/>
 
 		{#if sheetHidden}

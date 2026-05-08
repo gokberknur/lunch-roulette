@@ -1,4 +1,4 @@
-export type Amenity = 'restaurant' | 'cafe' | 'fast_food' | 'food_court';
+export type Amenity = 'restaurant' | 'fast_food' | 'food_court';
 
 export type Place = {
 	id: string;
