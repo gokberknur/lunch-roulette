@@ -1,65 +1,44 @@
 # Lunch Roulette
 
-Mobile-first PWA that picks a lunch spot near the office.
+A tiny PWA that picks a lunch spot near the office. Mobile-first, installable, runs entirely on free services.
 
-- Office: WTC Stockholm (Klarabergsviadukten 70), 500 m radius.
-- Restaurant data: [Overpass API](https://overpass-api.de/) (OpenStreetMap), no key required.
-- Map: [MapLibre GL](https://maplibre.org/) + [MapTiler](https://www.maptiler.com/cloud/) tiles (free tier, OSM raster fallback in dev).
-- Walking directions: [OpenRouteService](https://openrouteservice.org/) free tier.
-- Live geolocation with "Find me" button (blue dot follows as you walk).
-- Installable on iOS / Android / desktop.
+- 🍔 Filter by cuisine + "open now"
+- 🎲 "Pick for us" if you can't decide
+- 🧭 Walking directions
+- 📍 Live "you are here" dot
+- 🌐 Installable on iOS / Android / desktop
 
-## Setup
+## Run it
 
 ```bash
-nvm use   # Node 24+
 npm install
-cp .env.example .env
-# add a free MapTiler key + OpenRouteService key (or skip MapTiler for OSM raster fallback in dev)
-npm run dev -- --host    # --host so you can open it on your phone
+cp .env.example .env    # keys are optional in dev
+npm run dev -- --host
 ```
 
-Open on phone via `http://<your-laptop-ip>:5173`.
+Then open `http://<your-laptop-ip>:5173/lunch` on your phone (same Wi-Fi).
 
-## Stack
+## What's behind it (all free)
 
-- SvelteKit (Svelte 5, runes mode)
-- `maplibre-gl` v5 — renderer (OSS, no token required)
-- OpenRouteService — walking-route API
-- `@sveltejs/adapter-static` — deploys anywhere static (Netlify / Vercel / Cloudflare Pages / GitHub Pages)
-- `@vite-pwa/sveltekit` — manifest + service worker + Workbox runtime caching for tiles & Overpass
-- `opening_hours` — parses OSM `opening_hours` strings for the "Open now" filter
+| Job                | Service                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Restaurant data    | [Overpass API](https://overpass-api.de/) (OpenStreetMap), no key                                                            |
+| Map rendering      | [MapLibre GL](https://maplibre.org/), OSS                                                                                   |
+| Map tiles          | [MapTiler](https://www.maptiler.com/cloud/) (free tier, 100k loads/mo); falls back to CartoDB Positron raster without a key |
+| Walking directions | [OpenRouteService](https://openrouteservice.org/) (free tier, 2000 reqs/day)                                                |
+| Live location      | `navigator.geolocation`                                                                                                     |
 
-## Configuration
+For production, grab a free MapTiler key (sharper vector tiles) and OpenRouteService key (directions need it). Both take a minute to sign up. Keys go in `.env`.
 
-| File | What |
-|---|---|
-| `src/lib/config.ts` | Office lat/lon and search radius |
-| `.env` | `PUBLIC_MAPTILER_KEY=…` ([sign up](https://www.maptiler.com/cloud/), free 100k tile loads/mo) |
-|       | `PUBLIC_ORS_KEY=…` ([sign up](https://openrouteservice.org/dev/#/signup), free 2000 directions/day) |
+## Move the office
 
-To move the office, edit `OFFICE` in `src/lib/config.ts` and the cache will rebuild on next load (the localStorage cache key is scoped to lat/lon/radius).
+Edit `OFFICE` in `src/lib/config.ts`. The localStorage cache key is scoped to coords + radius, so it rebuilds automatically.
 
-## Scripts
+## Build & deploy
 
 ```bash
-npm run dev          # Vite dev server
-npm run build        # Static build to /build
-npm run preview      # Serve the built app
-npm run test         # Vitest (lib/distance unit tests)
-npm run check        # svelte-check
-npm run lint         # Prettier + ESLint
-npm run format       # Prettier --write
-npm run icons        # Regenerate PNG PWA icons from static/icons/icon.svg
+npm run build      # static site → /build
+npm run preview
 ```
 
-## Deploy
-
-`npm run build` produces a fully static site in `build/`. Drop it on any static host. No server, no backend.
-
-## Known limits
-
-- Overpass occasionally rate-limits — the app falls back to the local cache (24 h TTL) and shows a notice.
-- OSM coverage in central Stockholm is excellent; in less-mapped areas you may see fewer results.
-- Without a MapTiler key, the dev fallback uses raw OSM tiles. **Don't ship that to production** — OSM's tile servers aren't for public app traffic. Get a free MapTiler key.
-- OpenRouteService free tier is 2000 walking-route requests per day across the whole API key. Each "Show directions" click counts as one.
+Drop the contents of `build/` on any static host (Netlify, Vercel, Cloudflare Pages, GitHub Pages). No backend.
