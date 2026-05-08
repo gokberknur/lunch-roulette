@@ -1,9 +1,7 @@
-import { OFFICE, RADIUS_M } from './config';
 import { haversineMeters, walkMinutes } from './distance';
 import type { Amenity, Place } from './types';
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-const CACHE_KEY = `lunch-roulette:places:v2:${OFFICE.lat},${OFFICE.lon}:${RADIUS_M}`;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const AMENITIES: Amenity[] = ['restaurant', 'fast_food', 'food_court'];
@@ -21,17 +19,23 @@ type OverpassResponse = { elements: OverpassElement[] };
 
 type Cached = { fetchedAt: number; places: Place[] };
 
-function buildQuery(): string {
+type Center = { lat: number; lon: number };
+
+function cacheKey(center: Center, radiusM: number): string {
+	return `lunch-roulette:places:v2:${center.lat.toFixed(4)},${center.lon.toFixed(4)}:${radiusM}`;
+}
+
+function buildQuery(center: Center, radiusM: number): string {
 	const filter = AMENITIES.join('|');
 	return `[out:json][timeout:25];
 (
-  node["amenity"~"^(${filter})$"](around:${RADIUS_M},${OFFICE.lat},${OFFICE.lon});
-  way["amenity"~"^(${filter})$"](around:${RADIUS_M},${OFFICE.lat},${OFFICE.lon});
+  node["amenity"~"^(${filter})$"](around:${radiusM},${center.lat},${center.lon});
+  way["amenity"~"^(${filter})$"](around:${radiusM},${center.lat},${center.lon});
 );
 out center tags;`;
 }
 
-function normalize(elements: OverpassElement[]): Place[] {
+function normalize(elements: OverpassElement[], center: Center): Place[] {
 	const places: Place[] = [];
 	for (const el of elements) {
 		const tags = el.tags ?? {};
@@ -45,7 +49,7 @@ function normalize(elements: OverpassElement[]): Place[] {
 		const lon = el.lon ?? el.center?.lon;
 		if (lat === undefined || lon === undefined) continue;
 
-		const distanceM = haversineMeters(OFFICE, { lat, lon });
+		const distanceM = haversineMeters(center, { lat, lon });
 
 		places.push({
 			id: `${el.type}/${el.id}`,
@@ -70,10 +74,10 @@ function normalize(elements: OverpassElement[]): Place[] {
 	return places;
 }
 
-function readCache(): Cached | null {
+function readCache(key: string): Cached | null {
 	if (typeof localStorage === 'undefined') return null;
 	try {
-		const raw = localStorage.getItem(CACHE_KEY);
+		const raw = localStorage.getItem(key);
 		if (!raw) return null;
 		return JSON.parse(raw) as Cached;
 	} catch {
@@ -81,11 +85,11 @@ function readCache(): Cached | null {
 	}
 }
 
-function writeCache(places: Place[]): void {
+function writeCache(key: string, places: Place[]): void {
 	if (typeof localStorage === 'undefined') return;
 	try {
 		const payload: Cached = { fetchedAt: Date.now(), places };
-		localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+		localStorage.setItem(key, JSON.stringify(payload));
 	} catch {
 		// quota or disabled — fine to ignore
 	}
@@ -97,8 +101,9 @@ export type FetchResult = {
 	fetchedAt: number;
 };
 
-export async function fetchPlaces(): Promise<FetchResult> {
-	const cached = readCache();
+export async function fetchPlaces(center: Center, radiusM: number): Promise<FetchResult> {
+	const key = cacheKey(center, radiusM);
+	const cached = readCache(key);
 	const fresh = cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS;
 	if (cached && fresh) {
 		return { places: cached.places, source: 'cache', fetchedAt: cached.fetchedAt };
@@ -108,12 +113,12 @@ export async function fetchPlaces(): Promise<FetchResult> {
 		const res = await fetch(OVERPASS_URL, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-			body: 'data=' + encodeURIComponent(buildQuery())
+			body: 'data=' + encodeURIComponent(buildQuery(center, radiusM))
 		});
 		if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
 		const data = (await res.json()) as OverpassResponse;
-		const places = normalize(data.elements);
-		writeCache(places);
+		const places = normalize(data.elements, center);
+		writeCache(key, places);
 		return { places, source: 'network', fetchedAt: Date.now() };
 	} catch (err) {
 		if (cached) {

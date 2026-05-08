@@ -12,6 +12,7 @@
 	type Props = {
 		places: Place[];
 		selectedId: string | null;
+		searchCenter?: { lat: number; lon: number };
 		userLocation?: { lat: number; lon: number } | null;
 		accuracy?: number | null;
 		followUser?: boolean;
@@ -27,6 +28,7 @@
 	let {
 		places,
 		selectedId,
+		searchCenter = { lat: OFFICE.lat, lon: OFFICE.lon },
 		userLocation = null,
 		accuracy = null,
 		followUser = false,
@@ -93,7 +95,7 @@
 		map = new maplibregl.Map({
 			container,
 			style: styleUrl,
-			center: [OFFICE.lon, OFFICE.lat],
+			center: [searchCenter.lon, searchCenter.lat],
 			zoom: 16,
 			attributionControl: { compact: true }
 		});
@@ -107,7 +109,7 @@
 
 		map.on('load', () => {
 			if (!map) return;
-			map.addSource('radius', { type: 'geojson', data: radiusPolygon(OFFICE, RADIUS_M) });
+			map.addSource('radius', { type: 'geojson', data: radiusPolygon(searchCenter, RADIUS_M) });
 			map.addLayer({
 				id: 'radius-fill',
 				type: 'fill',
@@ -291,6 +293,18 @@
 			userMarker.remove();
 			userMarker = undefined;
 		}
+	});
+
+	$effect(() => {
+		if (!map || !mapReady) return;
+		const src = map.getSource('radius') as maplibregl.GeoJSONSource | undefined;
+		if (!src) return;
+		src.setData({
+			type: 'FeatureCollection',
+			features: [radiusPolygon(searchCenter, RADIUS_M)]
+		});
+		// recentre the map on the new search center (initial OFFICE → user's location)
+		map.flyTo({ center: [searchCenter.lon, searchCenter.lat], zoom: 16, duration: 800 });
 	});
 
 	$effect(() => {

@@ -16,6 +16,10 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
+	let searchCenter = $state<{ lat: number; lon: number }>({ lat: OFFICE.lat, lon: OFFICE.lon });
+	let searchCenterLabel = $state<string>(OFFICE.name);
+	let hasRecenteredOnUser = false;
+
 	const selectedCuisines = new SvelteSet<string>();
 	let openNowOnly = $state(false);
 	let selectedId = $state<string | null>(null);
@@ -33,14 +37,20 @@
 	let routeError = $state<string | null>(null);
 	let fitRoute = $state(false);
 
-	onMount(async () => {
+	async function loadPlaces(center: { lat: number; lon: number }) {
+		loading = true;
+		error = null;
 		try {
-			result = await fetchPlaces();
+			result = await fetchPlaces(center, RADIUS_M);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load restaurants';
 		} finally {
 			loading = false;
 		}
+	}
+
+	onMount(() => {
+		loadPlaces(searchCenter);
 	});
 
 	function stopFindMe() {
@@ -62,6 +72,13 @@
 				userPosition = pos;
 				findMeState = 'tracking';
 				followUser = true;
+				if (!hasRecenteredOnUser) {
+					hasRecenteredOnUser = true;
+					searchCenter = { lat: pos.lat, lon: pos.lon };
+					searchCenterLabel = 'Your location';
+					selectedCuisines.clear();
+					loadPlaces(searchCenter);
+				}
 			},
 			(err) => {
 				if (err.code === err.PERMISSION_DENIED) {
@@ -193,6 +210,7 @@
 		<MapView
 			places={filtered}
 			{selectedId}
+			{searchCenter}
 			userLocation={userPosition ? { lat: userPosition.lat, lon: userPosition.lon } : null}
 			accuracy={userPosition?.accuracy ?? null}
 			{followUser}
@@ -266,7 +284,7 @@
 		<header class="sheet-header">
 			<div class="title">
 				<span class="dot"></span>
-				<span>{OFFICE.name}</span>
+				<span>{searchCenterLabel}</span>
 				<span class="radius">· {RADIUS_M} m</span>
 			</div>
 			<PickForUs places={filtered} onpick={selectPlace} ondirections={showDirections} />
